@@ -674,7 +674,7 @@ function drawMenu(t) {
   const ms = mScale();
   const mobile = isMobile();
   const instrSize = mobile ? 32 : 17;
-  const instrLineH = mobile ? 36 : 26;
+  const instrLineH = mobile ? 40 : 26;
   ctx.fillStyle = 'rgba(200,230,225,0.92)';
   ctx.font = `${instrSize}px Georgia, serif`;
   if (mobile) {
@@ -692,7 +692,7 @@ function drawMenu(t) {
 
   const p = 0.65 + 0.35 * Math.sin(t * 0.04);
   ctx.fillStyle = `rgba(175,225,215,${p})`;
-  const ctaSize = mobile ? 28 : 21;
+  const ctaSize = mobile ? 42 : 21;
   ctx.font = `${ctaSize}px Georgia, serif`;
   const ctaText = mobile ? 'Tap to dive in' : 'Click to dive in';
   const ctaW = ctx.measureText(ctaText).width + 40;
