@@ -1,0 +1,1079 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Undercurrent</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; cursor: none; }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ─── State ───────────────────────────────────────────────────────────────────
+const STATE = { MENU: 'menu', PLAY: 'play', GAMEOVER: 'gameover' };
+let state = STATE.MENU;
+let lives = 3;
+let level = 1;
+let score = 0;
+let levelTimer = 0;
+let levelUpDisplay = 0;   // countdown frames to show level-up message
+let hitFlash = 0;         // countdown frames for screen flash on hit
+let invincible = 0;       // countdown frames of invincibility after hit
+let gameOverCard = { fact: '', headline: null };
+let gameOverAlpha = 0;    // fade-in on game over
+
+// ─── Mouse ───────────────────────────────────────────────────────────────────
+const mouse = { x: -999, y: -999 };
+window.addEventListener('mousemove', e => {
+  mouse.x = e.clientX; mouse.y = e.clientY;
+  initAudio();
+});
+
+// ─── Tuning ──────────────────────────────────────────────────────────────────
+const LEVEL_DURATION = 1200;    // frames per level (~20s at 60fps)
+const BASE_INTERVAL  = 32;      // base frames between trash spawns
+const BASE_SPEED_MIN = 3.8;
+const BASE_SPEED_MAX = 6.0;
+const PLAYER_SPEED   = 7.5;
+const PLAYER_TURN    = 0.14;    // how fast player turns (0–1)
+const TRASH_SCALE    = 1.9;
+
+// ─── Trash spawn queue ───────────────────────────────────────────────────────
+let spawnQueue = [];   // { delay, count } pending batch spawns
+let trashItems = [];
+let spawnTimer = 0;
+let spawnInterval = BASE_INTERVAL;
+
+function trashInterval() {
+  return Math.max(28, BASE_INTERVAL - (level - 1) * 7);
+}
+function trashSpeedMin() { return BASE_SPEED_MIN + (level - 1) * 0.18; }
+function trashSpeedMax() { return BASE_SPEED_MAX + (level - 1) * 0.28; }
+function trashBatchSize() { return 1 + Math.floor((level - 1) / 3); }
+
+// ─── Player ──────────────────────────────────────────────────────────────────
+const player = {
+  x: 0, y: 0,
+  vx: PLAYER_SPEED, vy: 0,
+  angle: 0,
+  radius: 28,
+  reset() {
+    this.x = canvas.width * 0.5;
+    this.y = canvas.height * 0.55;
+    this.angle = 0;
+    this.vx = PLAYER_SPEED;
+    this.vy = 0;
+  }
+};
+
+// ─── Bubbles ─────────────────────────────────────────────────────────────────
+let bubbles = [];
+function makeBubble(x, y, isTrail) {
+  return {
+    x: x ?? Math.random() * canvas.width,
+    y: y ?? canvas.height + Math.random() * canvas.height,
+    r: isTrail ? 1 + Math.random() * 2.5 : 1 + Math.random() * 4,
+    speed: isTrail ? 0.4 + Math.random() * 0.6 : 0.25 + Math.random() * 0.7,
+    wobble: Math.random() * Math.PI * 2,
+    wobbleRate: 0.02 + Math.random() * 0.025,
+    alpha: isTrail ? 0.5 + Math.random() * 0.3 : 0.08 + Math.random() * 0.22,
+    trail: !!isTrail,
+  };
+}
+for (let i = 0; i < 50; i++) bubbles.push(makeBubble());
+
+// ─── Seaweed ─────────────────────────────────────────────────────────────────
+let seaweeds = [];
+function buildSeaweeds() {
+  seaweeds = [];
+  const W = canvas.width;
+  // left cluster
+  [-30, 10, 55, 100, 145].forEach((ox, i) => {
+    seaweeds.push({ x: ox, segs: 7 + i, len: 130 + i * 30, phase: Math.random() * Math.PI * 2, rate: 0.008 + Math.random() * 0.008, hue: 140 + Math.random() * 25 });
+  });
+  // right cluster
+  [W + 30, W - 10, W - 55, W - 100, W - 145].forEach((ox, i) => {
+    seaweeds.push({ x: ox, segs: 7 + i, len: 130 + i * 30, phase: Math.random() * Math.PI * 2, rate: 0.008 + Math.random() * 0.008, hue: 140 + Math.random() * 25 });
+  });
+}
+buildSeaweeds();
+
+// ─── Light rays ──────────────────────────────────────────────────────────────
+let rays = [];
+function buildRays() {
+  rays = Array.from({ length: 6 }, () => ({
+    x: Math.random() * canvas.width,
+    w: 40 + Math.random() * 100,
+    alpha: 0.025 + Math.random() * 0.035,
+    rate: 0.0015 + Math.random() * 0.002,
+    phase: Math.random() * Math.PI * 2,
+  }));
+}
+buildRays();
+
+// ─── Ocean facts ─────────────────────────────────────────────────────────────
+const FACTS = [
+  "Every minute, the equivalent of a garbage truck of plastic is dumped into the ocean.",
+  "By 2050, there could be more plastic in the ocean than fish by weight.",
+  "The Great Pacific Garbage Patch is now over twice the size of Texas.",
+  "Over 1 million seabirds and 100,000 marine mammals die from ocean plastic every year.",
+  "A single plastic bag can take up to 1,000 years to break down in the ocean.",
+  "Microplastics have been discovered in the deepest point of the Mariana Trench.",
+  "8 million metric tons of plastic enter our oceans every single year.",
+  "Nearly 46% of the Great Pacific Garbage Patch is made up of fishing nets.",
+  "Humans have produced more plastic in the last decade than in the entire 20th century.",
+  "Cigarette butts are the most collected item in beach clean-ups worldwide.",
+  "Ocean plastic kills over 100,000 turtles and marine mammals annually through entanglement and ingestion.",
+  "Less than 10% of all plastic ever produced has been recycled.",
+  "Plastic pollution costs the global economy an estimated $13 billion in environmental damage every year.",
+  "Around 80% of ocean plastic originates from land-based sources.",
+  "A plastic bottle can survive in the ocean for up to 450 years before breaking down.",
+  "Coral reefs that come into contact with plastic are 89% more likely to contract disease.",
+  "There are now more pieces of microplastic in the ocean than there are stars in the Milky Way.",
+  "Over 700 marine species are threatened by ocean plastic pollution.",
+  "Discarded fishing gear — known as 'ghost gear' — traps and kills marine animals long after it's abandoned.",
+  "Plastic debris absorbs toxic chemicals from seawater, concentrating them before entering the food chain.",
+  "The average person ingests approximately 5 grams of plastic every week — roughly the weight of a credit card.",
+  "Seabirds that ingest plastic feed it to their chicks, leading to malnutrition and death.",
+  "Balloons released into the air almost always end up in the ocean, where sea turtles mistake them for jellyfish.",
+  "Tyre rubber is one of the largest sources of microplastic pollution in the ocean.",
+  "Single-use plastics make up 50% of all plastic produced globally, yet are used for only minutes.",
+  "By 2040, ocean plastic pollution is projected to nearly triple without urgent intervention.",
+  "Oil spills, though highly visible, account for less than 10% of ocean pollution — plastic is far more pervasive.",
+  "Deep-sea sediments contain more microplastic per litre than surface waters, making the ocean floor a plastic sink.",
+  "Abandoned, lost, or discarded fishing nets make up an estimated 640,000 tonnes of ocean plastic every year.",
+  "Replacing all single-use plastic globally with reusable alternatives could prevent billions of items from entering the ocean each year.",
+];
+
+// ─── Live news headlines ──────────────────────────────────────────────────────
+// Fetched once on load from Guardian environment RSS via rss2json proxy.
+// Each entry: { text, source, url }
+let liveHeadlines = [];
+
+(async function fetchNews() {
+  try {
+    const feeds = [
+      'https://www.theguardian.com/environment/ocean/rss',
+      'https://www.theguardian.com/environment/pollution/rss',
+    ];
+    const results = await Promise.all(feeds.map(rss =>
+      fetch(`https://api.rss2json.com/v1/api.json?rss_url=${encodeURIComponent(rss)}&api_key=&count=10`)
+        .then(r => r.json()).catch(() => null)
+    ));
+    results.forEach(data => {
+      if (!data || data.status !== 'ok') return;
+      data.items.forEach(item => {
+        const text = item.title ? item.title.trim() : null;
+        if (text && text.length > 20) {
+          const date = item.pubDate ? new Date(item.pubDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : null;
+          liveHeadlines.push({ text, source: 'The Guardian', date, url: item.link });
+        }
+      });
+    });
+  } catch (_) {}
+})();
+
+function pickGameOverCard() {
+  const fact = FACTS[Math.floor(Math.random() * FACTS.length)];
+  const headline = liveHeadlines.length
+    ? liveHeadlines[Math.floor(Math.random() * liveHeadlines.length)]
+    : null;
+  return { fact, headline };
+}
+
+// ─── Trash types — unlocked progressively by depth ───────────────────────────
+// Each tier adds to the pool; earlier types stay in rotation throughout.
+const TRASH_TIERS = [
+  { fromDepth: 1, types: ['bottle', 'can', 'straw'] },
+  { fromDepth: 2, types: ['cup', 'cigarette'] },
+  { fromDepth: 3, types: ['bag', 'ring'] },
+  { fromDepth: 5, types: ['balloon', 'battery'] },
+  { fromDepth: 7, types: ['tyre', 'hook'] },
+];
+
+function availableTypes() {
+  const pool = [];
+  for (const tier of TRASH_TIERS) {
+    if (level >= tier.fromDepth) pool.push(...tier.types);
+  }
+  return pool;
+}
+
+function makeTrash() {
+  const pool = availableTypes();
+  const type = pool[Math.floor(Math.random() * pool.length)];
+  const dims = {
+    bottle: [14, 44], bag: [34, 40], can: [18, 34],
+    straw: [5, 58], cup: [26, 36], cigarette: [5, 48], ring: [20, 20],
+    balloon: [22, 34], battery: [14, 36], tyre: [28, 28], hook: [18, 28],
+  };
+  const [w, h] = dims[type];
+  return {
+    type,
+    x: 70 + Math.random() * (canvas.width - 140),
+    y: -80,
+    w, h,
+    radius: Math.max(w, h) * 0.48 * TRASH_SCALE,
+    speed: trashSpeedMin() + Math.random() * (trashSpeedMax() - trashSpeedMin()),
+    rot: Math.random() * Math.PI * 2,
+    rotSpeed: (Math.random() - 0.5) * 0.045,
+    scored: false,
+  };
+}
+
+// ─── Draw trash ──────────────────────────────────────────────────────────────
+function drawTrashItem(t) {
+  ctx.save();
+  ctx.translate(t.x, t.y);
+  ctx.rotate(t.rot);
+  ctx.scale(TRASH_SCALE, TRASH_SCALE);
+
+  switch (t.type) {
+    case 'bottle': {
+      // body
+      ctx.fillStyle = 'rgba(110,190,215,0.55)';
+      ctx.strokeStyle = 'rgba(90,170,200,0.85)';
+      ctx.lineWidth = 1.5;
+      roundRect(ctx, -7, -14, 14, 28, 3); ctx.fill(); ctx.stroke();
+      // neck
+      ctx.fillStyle = 'rgba(90,170,200,0.5)';
+      roundRect(ctx, -4, -22, 8, 9, 2); ctx.fill(); ctx.stroke();
+      // cap
+      ctx.fillStyle = 'rgba(210,55,55,0.85)';
+      roundRect(ctx, -5, -26, 10, 6, 2); ctx.fill();
+      // label
+      ctx.fillStyle = 'rgba(255,255,255,0.12)';
+      ctx.fillRect(-5, -7, 10, 12);
+      break;
+    }
+    case 'bag': {
+      ctx.fillStyle = 'rgba(230,230,250,0.3)';
+      ctx.strokeStyle = 'rgba(200,200,240,0.65)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(0, -20);
+      ctx.bezierCurveTo(-17, -14, -19, 4, -11, 18);
+      ctx.bezierCurveTo(-4, 22, 4, 22, 11, 18);
+      ctx.bezierCurveTo(19, 4, 17, -14, 0, -20);
+      ctx.fill(); ctx.stroke();
+      // handles
+      ctx.strokeStyle = 'rgba(200,200,240,0.55)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(-8,-20); ctx.quadraticCurveTo(-14,-32,-6,-34); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo( 8,-20); ctx.quadraticCurveTo( 14,-32, 6,-34); ctx.stroke();
+      break;
+    }
+    case 'can': {
+      ctx.fillStyle = 'rgba(175,55,40,0.78)';
+      ctx.strokeStyle = 'rgba(210,90,65,0.9)';
+      ctx.lineWidth = 1.5;
+      roundRect(ctx, -9, -17, 18, 34, 3); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(200,200,200,0.45)';
+      ctx.fillRect(-9,-17,18,4); ctx.fillRect(-9,13,18,4);
+      ctx.fillStyle = 'rgba(255,255,255,0.1)';
+      ctx.fillRect(-7,-8,14,16);
+      break;
+    }
+    case 'straw': {
+      ctx.fillStyle = 'rgba(215,75,75,0.82)';
+      ctx.strokeStyle = 'rgba(240,100,100,0.9)';
+      ctx.lineWidth = 1;
+      roundRect(ctx, -2.5, -29, 5, 58, 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      for (let s = -24; s < 29; s += 9) ctx.fillRect(-2.5, s, 5, 4);
+      break;
+    }
+    case 'cup': {
+      ctx.fillStyle = 'rgba(240,240,240,0.45)';
+      ctx.strokeStyle = 'rgba(200,200,200,0.75)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-9,-18); ctx.lineTo(-13,18); ctx.lineTo(13,18); ctx.lineTo(9,-18); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(200,200,200,0.6)';
+      ctx.beginPath(); ctx.ellipse(0,-18,10,4,0,0,Math.PI*2); ctx.fill();
+      break;
+    }
+    case 'cigarette': {
+      ctx.fillStyle = 'rgba(238,235,222,0.88)';
+      ctx.strokeStyle = 'rgba(200,195,170,0.85)';
+      ctx.lineWidth = 1;
+      roundRect(ctx,-2,-24,4,40,1.5); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = 'rgba(215,110,35,0.92)';
+      roundRect(ctx,-2,14,4,10,1); ctx.fill();
+      break;
+    }
+    case 'ring': {
+      ctx.strokeStyle = 'rgba(220,220,200,0.7)';
+      ctx.lineWidth = 2.5;
+      for (let rx = -1; rx <= 1; rx++) {
+        for (let ry = 0; ry <= 1; ry++) {
+          ctx.beginPath();
+          ctx.ellipse(rx * 9, ry * 9 - 4, 5, 4, 0, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+      }
+      break;
+    }
+    case 'balloon': {
+      // round balloon body
+      ctx.fillStyle = 'rgba(210,70,120,0.65)';
+      ctx.strokeStyle = 'rgba(230,100,145,0.85)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.ellipse(0, -10, 11, 14, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      // knot
+      ctx.fillStyle = 'rgba(180,50,100,0.85)';
+      ctx.beginPath(); ctx.ellipse(0, 4, 3, 3, 0, 0, Math.PI * 2); ctx.fill();
+      // string
+      ctx.strokeStyle = 'rgba(200,200,180,0.5)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, 7); ctx.quadraticCurveTo(6, 18, 2, 28); ctx.stroke();
+      // shine
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.beginPath(); ctx.ellipse(-4, -15, 3, 5, -0.4, 0, Math.PI * 2); ctx.fill();
+      break;
+    }
+    case 'battery': {
+      ctx.fillStyle = 'rgba(55,55,55,0.82)';
+      ctx.strokeStyle = 'rgba(100,100,80,0.85)';
+      ctx.lineWidth = 1.5;
+      roundRect(ctx, -7, -16, 14, 32, 2); ctx.fill(); ctx.stroke();
+      // positive terminal
+      ctx.fillStyle = 'rgba(150,150,130,0.9)';
+      roundRect(ctx, -3, -20, 6, 5, 1); ctx.fill();
+      // warning stripes
+      ctx.fillStyle = 'rgba(220,180,0,0.55)';
+      ctx.fillRect(-7, -4, 14, 5);
+      ctx.fillStyle = 'rgba(30,30,30,0.6)';
+      ctx.fillRect(-7, 1, 14, 5);
+      // label
+      ctx.strokeStyle = 'rgba(180,40,40,0.7)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(-3, 8); ctx.lineTo(3, 8); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, 5); ctx.lineTo(0, 11); ctx.stroke();
+      break;
+    }
+    case 'tyre': {
+      // outer tyre
+      ctx.strokeStyle = 'rgba(60,55,50,0.88)';
+      ctx.lineWidth = 7;
+      ctx.beginPath(); ctx.arc(0, 0, 13, 0, Math.PI * 2); ctx.stroke();
+      // tread marks
+      ctx.strokeStyle = 'rgba(80,75,70,0.6)';
+      ctx.lineWidth = 2;
+      for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
+        ctx.beginPath();
+        ctx.arc(0, 0, 14, a, a + 0.3);
+        ctx.stroke();
+      }
+      // rim
+      ctx.strokeStyle = 'rgba(140,130,110,0.6)';
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2); ctx.stroke();
+      // spokes
+      ctx.lineWidth = 1.5;
+      for (let a = 0; a < Math.PI * 2; a += Math.PI / 3) {
+        ctx.beginPath();
+        ctx.moveTo(Math.cos(a)*6, Math.sin(a)*6);
+        ctx.lineTo(Math.cos(a)*13, Math.sin(a)*13);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'hook': {
+      // fishing hook
+      ctx.strokeStyle = 'rgba(180,175,160,0.85)';
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(0, -14);
+      ctx.lineTo(0, 8);
+      ctx.arc(0, 8, 8, -Math.PI * 0.5, Math.PI * 0.5);
+      ctx.lineTo(-3, 16);
+      ctx.stroke();
+      // barb
+      ctx.beginPath();
+      ctx.moveTo(-3, 16); ctx.lineTo(4, 10);
+      ctx.stroke();
+      // eye loop at top
+      ctx.beginPath(); ctx.arc(0, -14, 3, 0, Math.PI * 2); ctx.stroke();
+      // short fishing line
+      ctx.strokeStyle = 'rgba(200,200,180,0.35)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(0, -17); ctx.lineTo(0, -28); ctx.stroke();
+      break;
+    }
+  }
+
+  ctx.restore();
+}
+
+// ─── Round rect helper (polyfill) ────────────────────────────────────────────
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+// ─── Draw player ─────────────────────────────────────────────────────────────
+function drawPlayer(t) {
+  const { x, y, angle } = player;
+  const blink = invincible > 0 && Math.floor(t / 6) % 2 === 0;
+  if (blink) return;
+
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+  ctx.scale(1.9, 1.9);
+
+  const skin = 'rgba(200,175,145,0.92)';
+  const dark = 'rgba(160,135,110,0.88)';
+
+  // body
+  ctx.fillStyle = skin;
+  ctx.beginPath(); ctx.ellipse(0, 0, 11, 6, 0, 0, Math.PI * 2); ctx.fill();
+
+  // head
+  ctx.fillStyle = skin;
+  ctx.beginPath(); ctx.arc(13, -1, 5, 0, Math.PI * 2); ctx.fill();
+
+  // arm reaching forward
+  ctx.strokeStyle = dark; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(7, -1); ctx.quadraticCurveTo(12, -8, 20, -5); ctx.stroke();
+
+  // legs
+  ctx.beginPath(); ctx.moveTo(-8, 1); ctx.quadraticCurveTo(-16, 5, -20, 9); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(-7, 3); ctx.quadraticCurveTo(-15, 9, -19, 14); ctx.stroke();
+
+  ctx.restore();
+}
+
+// ─── Draw background ─────────────────────────────────────────────────────────
+function drawBG(t) {
+  const W = canvas.width, H = canvas.height;
+
+  // base gradient
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0,   '#060f14');
+  g.addColorStop(0.35,'#071820');
+  g.addColorStop(0.7, '#061610');
+  g.addColorStop(1,   '#040d09');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  // light rays
+  rays.forEach(r => {
+    const a = r.alpha * (0.7 + 0.3 * Math.sin(t * r.rate + r.phase));
+    const rg = ctx.createLinearGradient(r.x, 0, r.x, H * 0.85);
+    rg.addColorStop(0, `rgba(140,195,155,${a})`);
+    rg.addColorStop(1, `rgba(140,195,155,0)`);
+    ctx.fillStyle = rg;
+    ctx.beginPath();
+    ctx.moveTo(r.x - r.w * 0.5, 0);
+    ctx.lineTo(r.x + r.w * 0.5, 0);
+    ctx.lineTo(r.x + r.w * 0.28, H * 0.85);
+    ctx.lineTo(r.x - r.w * 0.28, H * 0.85);
+    ctx.closePath();
+    ctx.fill();
+  });
+
+  // lantern glow at top (like the image)
+  [[W * 0.3, 0], [W * 0.62, 0], [W * 0.78, 0]].forEach(([lx, ly]) => {
+    const lg = ctx.createRadialGradient(lx, ly, 0, lx, ly, 180);
+    lg.addColorStop(0,   'rgba(200,170,90,0.18)');
+    lg.addColorStop(0.4, 'rgba(160,130,60,0.06)');
+    lg.addColorStop(1,   'rgba(0,0,0,0)');
+    ctx.fillStyle = lg;
+    ctx.fillRect(lx - 180, ly, 360, 180);
+  });
+}
+
+// ─── Draw seaweed ────────────────────────────────────────────────────────────
+function drawSeaweeds(t) {
+  const H = canvas.height;
+  seaweeds.forEach(sw => {
+    sw.phase += sw.rate;
+    const segLen = sw.len / sw.segs;
+    ctx.lineWidth = 7;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    // dark layer
+    ctx.strokeStyle = `hsla(${sw.hue},35%,7%,0.9)`;
+    ctx.beginPath();
+    let cx = sw.x, cy = H;
+    ctx.moveTo(cx, cy);
+    for (let s = 0; s < sw.segs; s++) {
+      const sway = Math.sin(sw.phase + s * 0.75) * 14;
+      cx += sway; cy -= segLen;
+      ctx.lineTo(cx, cy);
+    }
+    ctx.stroke();
+
+    // lighter highlight
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = `hsla(${sw.hue},38%,14%,0.6)`;
+    ctx.stroke();
+  });
+}
+
+// ─── Draw bubbles ────────────────────────────────────────────────────────────
+function updateBubbles() {
+  bubbles.forEach(b => {
+    b.y -= b.speed;
+    b.wobble += b.wobbleRate;
+    const wx = Math.sin(b.wobble) * 2.5;
+    if (b.y < -20) {
+      if (b.trail) { bubbles.splice(bubbles.indexOf(b), 1); return; }
+      Object.assign(b, makeBubble());
+      b.y = canvas.height + 10;
+    }
+    ctx.beginPath();
+    ctx.arc(b.x + wx, b.y, b.r, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(170,215,205,${b.alpha})`;
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+    // shine
+    ctx.beginPath();
+    ctx.arc(b.x + wx - b.r * 0.3, b.y - b.r * 0.3, b.r * 0.28, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(230,248,242,${b.alpha * 0.45})`;
+    ctx.fill();
+  });
+}
+
+// ─── Draw HUD ────────────────────────────────────────────────────────────────
+function drawHUD() {
+  // Hearts
+  for (let i = 0; i < 3; i++) {
+    drawHeart(30 + i * 32, 36, 12, i < lives);
+  }
+
+  // Score + level
+  ctx.save();
+  ctx.textAlign = 'right';
+  ctx.font = '14px Georgia, serif';
+  ctx.fillStyle = 'rgba(215,240,235,0.95)';
+  ctx.fillText(`${score} dodged`, canvas.width - 26, 28);
+  ctx.fillStyle = 'rgba(200,230,225,0.88)';
+  ctx.fillText(`DEPTH ${level}`, canvas.width - 26, 48);
+  ctx.restore();
+
+  // Level-up announcement
+  if (levelUpDisplay > 0) {
+    const a = Math.min(1, levelUpDisplay / 30);
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.fillStyle = `rgba(180,230,215,${a * 0.9})`;
+    ctx.font = 'italic 26px Georgia, serif';
+    ctx.fillText(`Depth ${level}`, canvas.width * 0.5, canvas.height * 0.18);
+    ctx.restore();
+    levelUpDisplay--;
+  }
+}
+
+function drawHeart(x, y, r, filled) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.beginPath();
+  ctx.moveTo(0, r * 0.4);
+  ctx.bezierCurveTo(-r * 0.9, -r * 0.6, -r * 1.6, r * 0.15, 0, r * 1.2);
+  ctx.bezierCurveTo( r * 1.6, r * 0.15,  r * 0.9, -r * 0.6, 0, r * 0.4);
+  ctx.fillStyle   = filled ? 'rgba(218,55,75,0.92)' : 'rgba(70,35,45,0.45)';
+  ctx.strokeStyle = filled ? 'rgba(255,100,120,0.7)' : 'rgba(90,50,60,0.4)';
+  ctx.lineWidth = 1.2;
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ─── Draw custom cursor ───────────────────────────────────────────────────────
+function drawCursor() {
+  const x = mouse.x, y = mouse.y;
+  if (x < 0) return;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(160,215,205,0.6)';
+  ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.arc(x, y, 7, 0, Math.PI * 2); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x - 12, y); ctx.lineTo(x - 4, y); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x + 4,  y); ctx.lineTo(x + 12, y); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x, y - 12); ctx.lineTo(x, y - 4); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x, y + 4);  ctx.lineTo(x, y + 12); ctx.stroke();
+  ctx.restore();
+}
+
+// ─── Menu screen ─────────────────────────────────────────────────────────────
+function drawMenu(t) {
+  ctx.fillStyle = 'rgba(4,10,14,0.68)';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(148,208,198,0.95)';
+  ctx.font = 'bold 56px Georgia, serif';
+  ctx.fillText('UNDERCURRENT', canvas.width * 0.5, canvas.height * 0.33);
+
+  ctx.fillStyle = 'rgba(200,230,225,0.92)';
+  ctx.font = '17px Georgia, serif';
+  ctx.fillText('Navigate the swimmer through polluted waters.', canvas.width * 0.5, canvas.height * 0.43);
+  ctx.fillText('Move your cursor to steer — the swimmer is always in motion.', canvas.width * 0.5, canvas.height * 0.49);
+  ctx.fillText('Avoid the litter. You have 3 lives for the entire run.', canvas.width * 0.5, canvas.height * 0.55);
+
+  const p = 0.65 + 0.35 * Math.sin(t * 0.04);
+  ctx.fillStyle = `rgba(175,225,215,${p})`;
+  ctx.font = '21px Georgia, serif';
+  ctx.fillText('Click to dive in', canvas.width * 0.5, canvas.height * 0.70);
+
+  ctx.textAlign = 'left';
+}
+
+// ─── Game Over screen ─────────────────────────────────────────────────────────
+function drawGameOver(t) {
+  gameOverAlpha = Math.min(1, gameOverAlpha + 0.015);
+  const a = gameOverAlpha;
+
+  ctx.fillStyle = `rgba(3,7,11,${a * 0.88})`;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  ctx.textAlign = 'center';
+
+  ctx.fillStyle = `rgba(205,55,75,${a * 0.95})`;
+  ctx.font = `bold 68px Georgia, serif`;
+  ctx.fillText('GAME OVER', canvas.width * 0.5, canvas.height * 0.28);
+
+  // decorative line
+  ctx.strokeStyle = `rgba(90,145,135,${a * 0.4})`;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(canvas.width * 0.2, canvas.height * 0.36);
+  ctx.lineTo(canvas.width * 0.8, canvas.height * 0.36);
+  ctx.stroke();
+
+  // ── Prominent fact ──
+  ctx.fillStyle = `rgba(120,185,175,${a * 0.85})`;
+  ctx.font = `italic 19px Georgia, serif`;
+  ctx.fillText('Did you know?', canvas.width * 0.5, canvas.height * 0.42);
+
+  ctx.fillStyle = `rgba(195,228,222,${a * 0.92})`;
+  ctx.font = `22px Georgia, serif`;
+  wrapText(gameOverCard.fact, canvas.width * 0.5, canvas.height * 0.50, canvas.width * 0.58, 34);
+
+  // ── De-emphasised news headline ──
+  if (gameOverCard.headline) {
+    ctx.strokeStyle = `rgba(80,120,115,${a * 0.3})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(canvas.width * 0.25, canvas.height * 0.70);
+    ctx.lineTo(canvas.width * 0.75, canvas.height * 0.70);
+    ctx.stroke();
+
+    ctx.fillStyle = `rgba(160,205,195,${a * 0.85})`;
+    ctx.font = `italic 13px Georgia, serif`;
+    ctx.fillText('In the news:', canvas.width * 0.5, canvas.height * 0.724);
+
+    ctx.fillStyle = `rgba(210,235,230,${a * 0.88})`;
+    ctx.font = `14px Georgia, serif`;
+    wrapText(gameOverCard.headline.text, canvas.width * 0.5, canvas.height * 0.762, canvas.width * 0.52, 22);
+
+    const attribution = gameOverCard.headline.date
+      ? `— ${gameOverCard.headline.source}, ${gameOverCard.headline.date}`
+      : `— ${gameOverCard.headline.source}`;
+    ctx.fillStyle = `rgba(170,205,198,${a * 0.8})`;
+    ctx.font = `italic 12px Georgia, serif`;
+    ctx.fillText(attribution, canvas.width * 0.5, canvas.height * 0.800);
+  }
+
+  const p = 0.65 + 0.35 * Math.sin(t * 0.04);
+  ctx.fillStyle = `rgba(145,200,190,${a * p})`;
+  ctx.font = '19px Georgia, serif';
+  ctx.fillText('Click to try again', canvas.width * 0.5, gameOverCard.headline ? canvas.height * 0.88 : canvas.height * 0.83);
+
+  ctx.textAlign = 'left';
+}
+
+function wrapText(text, cx, y, maxW, lh) {
+  const words = text.split(' ');
+  let line = '';
+  for (let i = 0; i < words.length; i++) {
+    const test = line + words[i] + ' ';
+    if (ctx.measureText(test).width > maxW && i > 0) {
+      ctx.fillText(line.trim(), cx, y);
+      line = words[i] + ' ';
+      y += lh;
+    } else { line = test; }
+  }
+  ctx.fillText(line.trim(), cx, y);
+}
+
+// ─── Audio ───────────────────────────────────────────────────────────────────
+let ac = null;
+let musicStarted = false;
+let sharedReverb = null;
+
+function initAudio() {
+  if (ac) return;
+  ac = new (window.AudioContext || window.webkitAudioContext)();
+  sharedReverb = createReverb(5, 2.8);
+  sharedReverb.connect(ac.destination);
+  startUnderwaterNoise();
+  startMusicPad();
+}
+
+function createReverb(duration, decay) {
+  const len = ac.sampleRate * duration;
+  const buf = ac.createBuffer(2, len, ac.sampleRate);
+  for (let c = 0; c < 2; c++) {
+    const d = buf.getChannelData(c);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
+  }
+  const conv = ac.createConvolver();
+  conv.buffer = buf;
+  return conv;
+}
+
+function startUnderwaterNoise() {
+  const len = ac.sampleRate * 4;
+  const buf = ac.createBuffer(1, len, ac.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  const src = ac.createBufferSource();
+  src.buffer = buf; src.loop = true;
+  const lp = ac.createBiquadFilter();
+  lp.type = 'lowpass'; lp.frequency.value = 160;
+  const g = ac.createGain(); g.gain.value = 0.03;
+  src.connect(lp); lp.connect(g); g.connect(ac.destination);
+  src.start();
+}
+
+function startMusicPad() {
+  if (musicStarted) return;
+  musicStarted = true;
+
+  const masterFilter = ac.createBiquadFilter();
+  masterFilter.type = 'lowpass';
+  masterFilter.frequency.value = 900;
+
+  const dryGain = ac.createGain();
+  dryGain.gain.value = 0;
+  dryGain.gain.setTargetAtTime(0.13, ac.currentTime, 3.5);
+
+  const wetSend = ac.createGain();
+  wetSend.gain.value = 0;
+  wetSend.gain.setTargetAtTime(0.2, ac.currentTime, 3.5);
+
+  masterFilter.connect(dryGain);  dryGain.connect(ac.destination);
+  masterFilter.connect(wetSend);  wetSend.connect(sharedReverb);
+
+  // Slow breathing LFO on master dry level
+  const breathLfo = ac.createOscillator();
+  breathLfo.frequency.value = 0.065;
+  const breathMod = ac.createGain();
+  breathMod.gain.value = 0.03;
+  breathLfo.connect(breathMod); breathMod.connect(dryGain.gain);
+  breathLfo.start();
+
+  // Dm7 chord: D2, A2, C3, D3, F3 — three detuned sines each for width
+  const chordFreqs = [73.42, 110.0, 130.81, 146.83, 174.61];
+  chordFreqs.forEach((freq, i) => {
+    [0, 1.8, -1.4].forEach((cents, j) => {
+      const osc = ac.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq * Math.pow(2, cents / 1200);
+      const vg = ac.createGain();
+      const t0 = ac.currentTime + i * 0.5 + j * 0.2;
+      vg.gain.setValueAtTime(0, t0);
+      vg.gain.linearRampToValueAtTime(j === 0 ? 0.052 : 0.018, t0 + 2.5);
+      osc.connect(vg); vg.connect(masterFilter);
+      osc.start(t0);
+    });
+  });
+
+  // Sparse high melody in D minor pentatonic — ghostly, wandering
+  const melodyPool = [293.66, 349.23, 392.0, 440.0, 523.25, 587.33, 659.26, 698.46];
+  function scheduleNote() {
+    if (!ac) return;
+    setTimeout(() => {
+      const freq = melodyPool[Math.floor(Math.random() * melodyPool.length)];
+      const osc = ac.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      const vibLfo = ac.createOscillator();
+      vibLfo.frequency.value = 4.2;
+      const vibMod = ac.createGain();
+      vibMod.gain.value = freq * 0.003;
+      vibLfo.connect(vibMod); vibMod.connect(osc.frequency);
+      vibLfo.start();
+      const mg = ac.createGain();
+      const t0 = ac.currentTime;
+      mg.gain.setValueAtTime(0, t0);
+      mg.gain.linearRampToValueAtTime(0.05, t0 + 1.4);
+      mg.gain.setTargetAtTime(0, t0 + 2.2, 2.0);
+      const ms = ac.createGain(); ms.gain.value = 0.7;
+      osc.connect(mg); mg.connect(ac.destination); mg.connect(ms); ms.connect(sharedReverb);
+      osc.start(t0); osc.stop(t0 + 9);
+      vibLfo.stop(t0 + 9);
+      scheduleNote();
+    }, 3500 + Math.random() * 9000);
+  }
+  scheduleNote();
+}
+
+function playClickSound() {
+  if (!ac) return;
+  const osc = ac.createOscillator();
+  osc.type = 'sine';
+  osc.frequency.value = 820;
+  osc.frequency.setTargetAtTime(180, ac.currentTime, 0.018);
+  const g = ac.createGain();
+  g.gain.setValueAtTime(0.13, ac.currentTime);
+  g.gain.setTargetAtTime(0, ac.currentTime + 0.01, 0.03);
+  osc.connect(g); g.connect(ac.destination);
+  osc.start(); osc.stop(ac.currentTime + 0.18);
+}
+function playHit() {
+  if (!ac) return;
+  // Low thud — short burst of filtered noise
+  const bufLen = ac.sampleRate * 0.25;
+  const buf = ac.createBuffer(1, bufLen, ac.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < bufLen; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / bufLen, 3);
+
+  const src = ac.createBufferSource();
+  src.buffer = buf;
+
+  const lp = ac.createBiquadFilter();
+  lp.type = 'lowpass';
+  lp.frequency.value = 220;
+
+  const g = ac.createGain();
+  g.gain.value = 0.9;
+  g.gain.setTargetAtTime(0, ac.currentTime + 0.05, 0.08);
+
+  src.connect(lp); lp.connect(g); g.connect(ac.destination);
+  src.start();
+
+  // distressed pitch drop
+  const osc = ac.createOscillator();
+  osc.frequency.value = 140;
+  osc.frequency.setTargetAtTime(55, ac.currentTime, 0.08);
+  const og = ac.createGain();
+  og.gain.value = 0.18;
+  og.gain.setTargetAtTime(0, ac.currentTime + 0.05, 0.1);
+  osc.connect(og); og.connect(ac.destination);
+  osc.start(); osc.stop(ac.currentTime + 0.4);
+}
+
+function playLevelUp() {
+  if (!ac) return;
+  // Soft ascending chime
+  [0, 4, 7, 12].forEach((semitone, i) => {
+    const freq = 220 * Math.pow(2, semitone / 12);
+    const osc = ac.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    const g = ac.createGain();
+    const t0 = ac.currentTime + i * 0.12;
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(0.12, t0 + 0.04);
+    g.gain.setTargetAtTime(0, t0 + 0.1, 0.18);
+    osc.connect(g); g.connect(ac.destination);
+    osc.start(t0); osc.stop(t0 + 0.8);
+  });
+}
+
+function playGameOver() {
+  if (!ac) return;
+  // Somber descending tones
+  [0, -3, -7, -12].forEach((semitone, i) => {
+    const freq = 220 * Math.pow(2, semitone / 12);
+    const osc = ac.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+    const g = ac.createGain();
+    const t0 = ac.currentTime + i * 0.28;
+    g.gain.setValueAtTime(0, t0);
+    g.gain.linearRampToValueAtTime(0.14, t0 + 0.05);
+    g.gain.setTargetAtTime(0, t0 + 0.2, 0.3);
+    osc.connect(g); g.connect(ac.destination);
+    osc.start(t0); osc.stop(t0 + 1.5);
+  });
+}
+
+// ─── Game logic ──────────────────────────────────────────────────────────────
+function updatePlayer() {
+  const dx = mouse.x - player.x;
+  const dy = mouse.y - player.y;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+
+  if (dist > 8) {
+    const target = Math.atan2(dy, dx);
+    let diff = target - player.angle;
+    while (diff >  Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    player.angle += diff * PLAYER_TURN;
+  }
+
+  const spd = PLAYER_SPEED + (level - 1) * 0.08;
+  player.vx = Math.cos(player.angle) * spd;
+  player.vy = Math.sin(player.angle) * spd;
+  player.x += player.vx;
+  player.y += player.vy;
+
+  // soft bounce off edges
+  const m = player.radius;
+  if (player.x < m)                    { player.x = m;                    player.angle = Math.PI - player.angle; }
+  if (player.x > canvas.width - m)     { player.x = canvas.width - m;     player.angle = Math.PI - player.angle; }
+  if (player.y < m)                    { player.y = m;                    player.angle = -player.angle; }
+  if (player.y > canvas.height - m)    { player.y = canvas.height - m;    player.angle = -player.angle; }
+}
+
+function updateTrashItems() {
+  spawnTimer++;
+  if (spawnTimer >= trashInterval()) {
+    spawnTimer = 0;
+    const n = trashBatchSize();
+    for (let i = 0; i < n; i++) {
+      spawnQueue.push({ at: Date.now() + i * 280 });
+    }
+  }
+
+  // flush queue
+  const now = Date.now();
+  spawnQueue = spawnQueue.filter(q => {
+    if (now >= q.at) { trashItems.push(makeTrash()); return false; }
+    return true;
+  });
+
+  trashItems.forEach(t => {
+    t.y += t.speed;
+    t.rot += t.rotSpeed;
+    if (!t.scored && t.y > canvas.height + 60) {
+      t.scored = true;
+      score++;
+    }
+  });
+
+  trashItems = trashItems.filter(t => t.y < canvas.height + 120);
+}
+
+function checkCollisions() {
+  if (invincible > 0) { invincible--; return; }
+
+  for (let i = trashItems.length - 1; i >= 0; i--) {
+    const t = trashItems[i];
+    const dx = player.x - t.x;
+    const dy = player.y - t.y;
+    if (Math.sqrt(dx * dx + dy * dy) < player.radius + t.radius * 0.46) {
+      lives--;
+      trashItems.splice(i, 1);
+      invincible = 110;
+      hitFlash = 18;
+      playHit();
+      if (lives <= 0) {
+        gameOverCard = pickGameOverCard();
+        gameOverAlpha = 0;
+        state = STATE.GAMEOVER;
+        playGameOver();
+      }
+      break;
+    }
+  }
+}
+
+function updateLevel() {
+  levelTimer++;
+  if (levelTimer >= LEVEL_DURATION) {
+    levelTimer = 0;
+    level++;
+    levelUpDisplay = 90;
+    playLevelUp();
+  }
+}
+
+// ─── Input ───────────────────────────────────────────────────────────────────
+canvas.addEventListener('click', () => {
+  initAudio();
+  playClickSound();
+  if (state === STATE.MENU)     { state = STATE.PLAY; resetGame(); }
+  if (state === STATE.GAMEOVER) { state = STATE.PLAY; resetGame(); }
+});
+
+function resetGame() {
+  lives = 3; level = 1; score = 0;
+  levelTimer = 0; levelUpDisplay = 0;
+  hitFlash = 0; invincible = 0;
+  trashItems = []; spawnQueue = [];
+  spawnTimer = 0;
+  buildSeaweeds(); buildRays();
+  player.reset();
+  // trim excess trail bubbles
+  bubbles = bubbles.filter(b => !b.trail);
+}
+
+// ─── Main loop ───────────────────────────────────────────────────────────────
+let t = 0;
+function loop() {
+  requestAnimationFrame(loop);
+  t++;
+
+  drawBG(t);
+  drawSeaweeds(t);
+  updateBubbles();
+
+  if (state === STATE.PLAY) {
+    updateTrashItems();
+    updatePlayer();
+    checkCollisions();
+    updateLevel();
+
+    // Spawn trail bubble behind player
+    if (t % 7 === 0) {
+      bubbles.push(makeBubble(
+        player.x - Math.cos(player.angle) * 16 + (Math.random() - 0.5) * 6,
+        player.y - Math.sin(player.angle) * 16 + (Math.random() - 0.5) * 6,
+        true
+      ));
+    }
+
+    // Hit flash overlay
+    if (hitFlash > 0) {
+      ctx.fillStyle = `rgba(200,40,60,${hitFlash / 18 * 0.22})`;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      hitFlash--;
+    }
+
+    trashItems.forEach(drawTrashItem);
+    drawPlayer(t);
+    drawHUD();
+  }
+
+  if (state === STATE.MENU)     drawMenu(t);
+  if (state === STATE.GAMEOVER) drawGameOver(t);
+
+  drawCursor();
+}
+
+player.reset();
+loop();
+</script>
+</body>
+</html>
