@@ -198,7 +198,7 @@ function pickGameOverCard() {
 // Each tier adds to the pool; earlier types stay in rotation throughout.
 const TRASH_TIERS = [
   { fromDepth: 1, types: ['bottle', 'can', 'straw'] },
-  { fromDepth: 2, types: ['cup', 'cigarette'] },
+  { fromDepth: 2, types: ['cup', 'cigarette', 'zyn'] },
   { fromDepth: 3, types: ['bag', 'ring'] },
   { fromDepth: 5, types: ['balloon', 'battery'] },
   { fromDepth: 7, types: ['tyre', 'hook'] },
@@ -218,7 +218,7 @@ function makeTrash() {
   const dims = {
     bottle: [14, 44], bag: [34, 40], can: [18, 34],
     straw: [5, 58], cup: [26, 36], cigarette: [5, 48], ring: [20, 20],
-    balloon: [22, 34], battery: [14, 36], tyre: [28, 28], hook: [18, 28],
+    balloon: [22, 34], battery: [14, 36], tyre: [28, 28], hook: [18, 28], zyn: [28, 10],
   };
   const [w, h] = dims[type];
   return {
@@ -391,6 +391,24 @@ function drawTrashItem(t) {
         ctx.lineTo(Math.cos(a)*13, Math.sin(a)*13);
         ctx.stroke();
       }
+      break;
+    }
+    case 'zyn': {
+      // Small round nicotine pouch tin — top-down view
+      ctx.fillStyle = 'rgba(240,240,235,0.88)';
+      ctx.strokeStyle = 'rgba(180,180,170,0.9)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.ellipse(0, 0, 14, 5, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      // lid ridge
+      ctx.strokeStyle = 'rgba(160,160,150,0.6)';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.ellipse(0, 0, 11, 3.5, 0, 0, Math.PI * 2); ctx.stroke();
+      // ZYN label
+      ctx.fillStyle = 'rgba(30,80,160,0.85)';
+      ctx.font = 'bold 4px Arial, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('ZYN', 0, 1.5);
+      ctx.textAlign = 'left';
       break;
     }
     case 'hook': {
