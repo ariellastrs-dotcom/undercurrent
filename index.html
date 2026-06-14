@@ -576,7 +576,7 @@ function drawHUD() {
   ctx.fillStyle = 'rgba(215,240,235,0.95)';
   ctx.fillText(`${score} dodged`, canvas.width - 26, 28);
   ctx.fillStyle = 'rgba(200,230,225,0.88)';
-  ctx.fillText(`DEPTH ${level}`, canvas.width - 26, 48);
+  ctx.fillText(`LEVEL ${level}`, canvas.width - 26, 48);
   ctx.restore();
 
   // Level-up announcement
@@ -586,7 +586,7 @@ function drawHUD() {
     ctx.textAlign = 'center';
     ctx.fillStyle = `rgba(180,230,215,${a * 0.9})`;
     ctx.font = 'italic 26px Georgia, serif';
-    ctx.fillText(`Depth ${level}`, canvas.width * 0.5, canvas.height * 0.18);
+    ctx.fillText(`Level ${level}`, canvas.width * 0.5, canvas.height * 0.18);
     ctx.restore();
     levelUpDisplay--;
   }
