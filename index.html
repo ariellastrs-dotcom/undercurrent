@@ -37,10 +37,14 @@ let gameOverAlpha = 0;    // fade-in on game over
 
 // ─── Mobile detection ────────────────────────────────────────────────────────
 const isMobile = () => window.innerWidth <= 768 || 'ontouchstart' in window;
-const mScale   = () => isMobile() ? 2.2 : 1;   // uniform UI scale factor
+const mScale   = () => isMobile() ? 1.5 : 1;   // uniform UI scale factor
+
+// ─── CTA hit area (updated each frame when CTA is drawn) ─────────────────────
+let ctaRect = null;
 
 // ─── Mouse / Touch ───────────────────────────────────────────────────────────
 const mouse = { x: -999, y: -999 };
+let lastTapX = -1, lastTapY = -1;
 window.addEventListener('mousemove', e => {
   mouse.x = e.clientX; mouse.y = e.clientY;
   initAudio();
@@ -684,7 +688,13 @@ function drawMenu(t) {
   const p = 0.65 + 0.35 * Math.sin(t * 0.04);
   ctx.fillStyle = `rgba(175,225,215,${p})`;
   ctx.font = `${Math.round(21 * ms)}px Georgia, serif`;
-  ctx.fillText(mobile ? 'Tap to dive in' : 'Click to dive in', canvas.width * 0.5, canvas.height * 0.72);
+  const ctaText = mobile ? 'Tap to dive in' : 'Click to dive in';
+  const ctaW = ctx.measureText(ctaText).width + 40;
+  const ctaH = Math.round(21 * ms) + 20;
+  const ctaX = canvas.width * 0.5 - ctaW / 2;
+  const ctaY = canvas.height * 0.72 - Math.round(21 * ms);
+  ctaRect = { x: ctaX, y: ctaY, w: ctaW, h: ctaH };
+  ctx.fillText(ctaText, canvas.width * 0.5, canvas.height * 0.72);
 
   ctx.textAlign = 'left';
 }
@@ -750,7 +760,12 @@ function drawGameOver(t) {
   const p = 0.65 + 0.35 * Math.sin(t * 0.04);
   ctx.fillStyle = `rgba(145,200,190,${a * p})`;
   ctx.font = `${Math.round(19 * ms)}px Georgia, serif`;
-  ctx.fillText(mobile ? 'Tap to try again' : 'Click to try again', canvas.width * 0.5, gameOverCard.headline ? canvas.height * 0.88 : canvas.height * 0.83);
+  const goCtaY = gameOverCard.headline ? canvas.height * 0.88 : canvas.height * 0.83;
+  const goCtaText = mobile ? 'Tap to try again' : 'Click to try again';
+  const goCtaW = ctx.measureText(goCtaText).width + 40;
+  const goCtaH = Math.round(19 * ms) + 20;
+  ctaRect = { x: canvas.width * 0.5 - goCtaW / 2, y: goCtaY - Math.round(19 * ms), w: goCtaW, h: goCtaH };
+  ctx.fillText(goCtaText, canvas.width * 0.5, goCtaY);
 
   ctx.textAlign = 'left';
 }
@@ -1055,16 +1070,23 @@ function updateLevel() {
 }
 
 // ─── Input ───────────────────────────────────────────────────────────────────
-function handleAdvance() {
+function hitsCTA(x, y) {
+  if (!ctaRect) return true; // desktop fallback — always allow
+  return x >= ctaRect.x && x <= ctaRect.x + ctaRect.w &&
+         y >= ctaRect.y && y <= ctaRect.y + ctaRect.h;
+}
+function handleAdvance(x, y) {
+  if (!hitsCTA(x, y)) return;
   initAudio();
   playClickSound();
   if (state === STATE.MENU)     { state = STATE.PLAY; resetGame(); }
   if (state === STATE.GAMEOVER) { state = STATE.PLAY; resetGame(); }
 }
-canvas.addEventListener('click', handleAdvance);
+canvas.addEventListener('click', e => handleAdvance(e.clientX, e.clientY));
 canvas.addEventListener('touchend', e => {
   e.preventDefault();
-  handleAdvance();
+  const t = e.changedTouches[0];
+  handleAdvance(t.clientX, t.clientY);
 }, { passive: false });
 
 function resetGame() {
@@ -1090,6 +1112,7 @@ function loop() {
   updateBubbles();
 
   if (state === STATE.PLAY) {
+    ctaRect = null;
     updateTrashItems();
     updatePlayer();
     checkCollisions();
