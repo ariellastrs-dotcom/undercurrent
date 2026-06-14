@@ -780,7 +780,7 @@ function drawGameOver(t) {
   const p = 0.65 + 0.35 * Math.sin(t * 0.04);
   ctx.fillStyle = `rgba(145,200,190,${a * p})`;
   const goCtaSize = mobile ? 42 : 19;
-  ctx.font = `${Math.round(goCtaSize * ms)}px Georgia, serif`;
+  ctx.font = `${goCtaSize}px Georgia, serif`;
   const goCtaY = gameOverCard.headline ? canvas.height * 0.88 : canvas.height * 0.83;
   const goCtaText = mobile ? 'Tap to try again' : 'Click to try again';
   const goCtaW = ctx.measureText(goCtaText).width + 40;
