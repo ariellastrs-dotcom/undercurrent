@@ -35,12 +35,27 @@ let invincible = 0;       // countdown frames of invincibility after hit
 let gameOverCard = { fact: '', headline: null };
 let gameOverAlpha = 0;    // fade-in on game over
 
-// ─── Mouse ───────────────────────────────────────────────────────────────────
+// ─── Mobile detection ────────────────────────────────────────────────────────
+const isMobile = () => window.innerWidth <= 768 || 'ontouchstart' in window;
+const mScale   = () => isMobile() ? 2.2 : 1;   // uniform UI scale factor
+
+// ─── Mouse / Touch ───────────────────────────────────────────────────────────
 const mouse = { x: -999, y: -999 };
 window.addEventListener('mousemove', e => {
   mouse.x = e.clientX; mouse.y = e.clientY;
   initAudio();
 });
+// Touch: follow drag anywhere on screen
+window.addEventListener('touchstart', e => {
+  initAudio();
+  const t = e.touches[0];
+  mouse.x = t.clientX; mouse.y = t.clientY;
+}, { passive: true });
+window.addEventListener('touchmove', e => {
+  e.preventDefault();
+  const t = e.touches[0];
+  mouse.x = t.clientX; mouse.y = t.clientY;
+}, { passive: false });
 
 // ─── Tuning ──────────────────────────────────────────────────────────────────
 const LEVEL_DURATION = 1200;    // frames per level (~20s at 60fps)
@@ -69,7 +84,7 @@ const player = {
   x: 0, y: 0,
   vx: PLAYER_SPEED, vy: 0,
   angle: 0,
-  radius: 28,
+  radius: 28 * mScale(),
   reset() {
     this.x = canvas.width * 0.5;
     this.y = canvas.height * 0.55;
@@ -226,7 +241,7 @@ function makeTrash() {
     x: 70 + Math.random() * (canvas.width - 140),
     y: -80,
     w, h,
-    radius: Math.max(w, h) * 0.48 * TRASH_SCALE,
+    radius: Math.max(w, h) * 0.48 * TRASH_SCALE * mScale(),
     speed: trashSpeedMin() + Math.random() * (trashSpeedMax() - trashSpeedMin()),
     rot: Math.random() * Math.PI * 2,
     rotSpeed: (Math.random() - 0.5) * 0.045,
@@ -239,7 +254,7 @@ function drawTrashItem(t) {
   ctx.save();
   ctx.translate(t.x, t.y);
   ctx.rotate(t.rot);
-  ctx.scale(TRASH_SCALE, TRASH_SCALE);
+  ctx.scale(TRASH_SCALE * mScale(), TRASH_SCALE * mScale());
 
   switch (t.type) {
     case 'bottle': {
@@ -463,7 +478,7 @@ function drawPlayer(t) {
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(angle);
-  ctx.scale(1.9, 1.9);
+  ctx.scale(1.9 * mScale(), 1.9 * mScale());
 
   const skin = 'rgba(200,175,145,0.92)';
   const dark = 'rgba(160,135,110,0.88)';
@@ -582,19 +597,21 @@ function updateBubbles() {
 
 // ─── Draw HUD ────────────────────────────────────────────────────────────────
 function drawHUD() {
-  // Hearts
+  const ms = mScale();
+  const heartR = 12 * ms;
+  const heartGap = heartR * 2.8;
   for (let i = 0; i < 3; i++) {
-    drawHeart(30 + i * 32, 36, 12, i < lives);
+    drawHeart(28 + i * heartGap, 28 + heartR, heartR, i < lives);
   }
 
   // Score + level
   ctx.save();
   ctx.textAlign = 'right';
-  ctx.font = '14px Georgia, serif';
+  ctx.font = `${Math.round(14 * ms)}px Georgia, serif`;
   ctx.fillStyle = 'rgba(215,240,235,0.95)';
-  ctx.fillText(`${score} dodged`, canvas.width - 26, 28);
+  ctx.fillText(`${score} dodged`, canvas.width - 26, 28 * ms);
   ctx.fillStyle = 'rgba(200,230,225,0.88)';
-  ctx.fillText(`LEVEL ${level}`, canvas.width - 26, 48);
+  ctx.fillText(`LEVEL ${level}`, canvas.width - 26, 28 * ms + Math.round(20 * ms));
   ctx.restore();
 
   // Level-up announcement
@@ -603,7 +620,7 @@ function drawHUD() {
     ctx.save();
     ctx.textAlign = 'center';
     ctx.fillStyle = `rgba(180,230,215,${a * 0.9})`;
-    ctx.font = 'italic 26px Georgia, serif';
+    ctx.font = `italic ${Math.round(26 * ms)}px Georgia, serif`;
     ctx.fillText(`Level ${level}`, canvas.width * 0.5, canvas.height * 0.18);
     ctx.restore();
     levelUpDisplay--;
@@ -650,16 +667,24 @@ function drawMenu(t) {
   ctx.font = 'bold 56px Georgia, serif';
   ctx.fillText('UNDERCURRENT', canvas.width * 0.5, canvas.height * 0.33);
 
+  const ms = mScale();
+  const mobile = isMobile();
   ctx.fillStyle = 'rgba(200,230,225,0.92)';
-  ctx.font = '17px Georgia, serif';
-  ctx.fillText('Navigate the swimmer through polluted waters.', canvas.width * 0.5, canvas.height * 0.43);
-  ctx.fillText('Move your cursor to steer — the swimmer is always in motion.', canvas.width * 0.5, canvas.height * 0.49);
-  ctx.fillText('Avoid the litter. You have 3 lives for the entire run.', canvas.width * 0.5, canvas.height * 0.55);
+  ctx.font = `${Math.round(17 * ms)}px Georgia, serif`;
+  if (mobile) {
+    wrapText('Navigate the swimmer through polluted waters.', canvas.width * 0.5, canvas.height * 0.43, canvas.width * 0.78, Math.round(26 * ms));
+    wrapText('Drag anywhere to steer — the swimmer is always in motion.', canvas.width * 0.5, canvas.height * 0.51, canvas.width * 0.78, Math.round(26 * ms));
+    wrapText('Avoid the litter. You have 3 lives for the entire run.', canvas.width * 0.5, canvas.height * 0.59, canvas.width * 0.78, Math.round(26 * ms));
+  } else {
+    ctx.fillText('Navigate the swimmer through polluted waters.', canvas.width * 0.5, canvas.height * 0.43);
+    ctx.fillText('Move your cursor to steer — the swimmer is always in motion.', canvas.width * 0.5, canvas.height * 0.49);
+    ctx.fillText('Avoid the litter. You have 3 lives for the entire run.', canvas.width * 0.5, canvas.height * 0.55);
+  }
 
   const p = 0.65 + 0.35 * Math.sin(t * 0.04);
   ctx.fillStyle = `rgba(175,225,215,${p})`;
-  ctx.font = '21px Georgia, serif';
-  ctx.fillText('Click to dive in', canvas.width * 0.5, canvas.height * 0.70);
+  ctx.font = `${Math.round(21 * ms)}px Georgia, serif`;
+  ctx.fillText(mobile ? 'Tap to dive in' : 'Click to dive in', canvas.width * 0.5, canvas.height * 0.72);
 
   ctx.textAlign = 'left';
 }
@@ -674,56 +699,58 @@ function drawGameOver(t) {
 
   ctx.textAlign = 'center';
 
-  ctx.fillStyle = `rgba(205,55,75,${a * 0.95})`;
-  ctx.font = `bold 68px Georgia, serif`;
-  ctx.fillText('GAME OVER', canvas.width * 0.5, canvas.height * 0.28);
+  const ms = mScale();
+  const mobile = isMobile();
 
-  // decorative line
+  ctx.fillStyle = `rgba(205,55,75,${a * 0.95})`;
+  ctx.font = `bold ${Math.round(68 * ms)}px Georgia, serif`;
+  ctx.fillText('GAME OVER', canvas.width * 0.5, canvas.height * 0.22);
+
   ctx.strokeStyle = `rgba(90,145,135,${a * 0.4})`;
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(canvas.width * 0.2, canvas.height * 0.36);
-  ctx.lineTo(canvas.width * 0.8, canvas.height * 0.36);
+  ctx.moveTo(canvas.width * 0.2, canvas.height * 0.30);
+  ctx.lineTo(canvas.width * 0.8, canvas.height * 0.30);
   ctx.stroke();
 
   // ── Prominent fact ──
   ctx.fillStyle = `rgba(120,185,175,${a * 0.85})`;
-  ctx.font = `italic 19px Georgia, serif`;
-  ctx.fillText('Did you know?', canvas.width * 0.5, canvas.height * 0.42);
+  ctx.font = `italic ${Math.round(19 * ms)}px Georgia, serif`;
+  ctx.fillText('Did you know?', canvas.width * 0.5, canvas.height * 0.35);
 
   ctx.fillStyle = `rgba(195,228,222,${a * 0.92})`;
-  ctx.font = `22px Georgia, serif`;
-  wrapText(gameOverCard.fact, canvas.width * 0.5, canvas.height * 0.50, canvas.width * 0.58, 34);
+  ctx.font = `${Math.round(22 * ms)}px Georgia, serif`;
+  wrapText(gameOverCard.fact, canvas.width * 0.5, canvas.height * 0.42, canvas.width * 0.82, Math.round(34 * ms));
 
   // ── De-emphasised news headline ──
   if (gameOverCard.headline) {
     ctx.strokeStyle = `rgba(80,120,115,${a * 0.3})`;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(canvas.width * 0.25, canvas.height * 0.70);
-    ctx.lineTo(canvas.width * 0.75, canvas.height * 0.70);
+    ctx.moveTo(canvas.width * 0.25, canvas.height * 0.65);
+    ctx.lineTo(canvas.width * 0.75, canvas.height * 0.65);
     ctx.stroke();
 
     ctx.fillStyle = `rgba(160,205,195,${a * 0.85})`;
-    ctx.font = `italic 13px Georgia, serif`;
-    ctx.fillText('In the news:', canvas.width * 0.5, canvas.height * 0.724);
+    ctx.font = `italic ${Math.round(13 * ms)}px Georgia, serif`;
+    ctx.fillText('In the news:', canvas.width * 0.5, canvas.height * 0.685);
 
     ctx.fillStyle = `rgba(210,235,230,${a * 0.88})`;
-    ctx.font = `14px Georgia, serif`;
-    wrapText(gameOverCard.headline.text, canvas.width * 0.5, canvas.height * 0.762, canvas.width * 0.52, 22);
+    ctx.font = `${Math.round(14 * ms)}px Georgia, serif`;
+    wrapText(gameOverCard.headline.text, canvas.width * 0.5, canvas.height * 0.722, canvas.width * 0.82, Math.round(22 * ms));
 
     const attribution = gameOverCard.headline.date
       ? `— ${gameOverCard.headline.source}, ${gameOverCard.headline.date}`
       : `— ${gameOverCard.headline.source}`;
     ctx.fillStyle = `rgba(170,205,198,${a * 0.8})`;
-    ctx.font = `italic 12px Georgia, serif`;
-    ctx.fillText(attribution, canvas.width * 0.5, canvas.height * 0.800);
+    ctx.font = `italic ${Math.round(12 * ms)}px Georgia, serif`;
+    ctx.fillText(attribution, canvas.width * 0.5, canvas.height * 0.775);
   }
 
   const p = 0.65 + 0.35 * Math.sin(t * 0.04);
   ctx.fillStyle = `rgba(145,200,190,${a * p})`;
-  ctx.font = '19px Georgia, serif';
-  ctx.fillText('Click to try again', canvas.width * 0.5, gameOverCard.headline ? canvas.height * 0.88 : canvas.height * 0.83);
+  ctx.font = `${Math.round(19 * ms)}px Georgia, serif`;
+  ctx.fillText(mobile ? 'Tap to try again' : 'Click to try again', canvas.width * 0.5, gameOverCard.headline ? canvas.height * 0.88 : canvas.height * 0.83);
 
   ctx.textAlign = 'left';
 }
@@ -1028,12 +1055,17 @@ function updateLevel() {
 }
 
 // ─── Input ───────────────────────────────────────────────────────────────────
-canvas.addEventListener('click', () => {
+function handleAdvance() {
   initAudio();
   playClickSound();
   if (state === STATE.MENU)     { state = STATE.PLAY; resetGame(); }
   if (state === STATE.GAMEOVER) { state = STATE.PLAY; resetGame(); }
-});
+}
+canvas.addEventListener('click', handleAdvance);
+canvas.addEventListener('touchend', e => {
+  e.preventDefault();
+  handleAdvance();
+}, { passive: false });
 
 function resetGame() {
   lives = 3; level = 1; score = 0;
