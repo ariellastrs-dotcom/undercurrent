@@ -673,28 +673,35 @@ function drawMenu(t) {
 
   const ms = mScale();
   const mobile = isMobile();
+  const instrSize = mobile ? 22 : 17;
+  const instrLineH = mobile ? 36 : 26;
   ctx.fillStyle = 'rgba(200,230,225,0.92)';
-  ctx.font = `${Math.round(17 * ms)}px Georgia, serif`;
+  ctx.font = `${instrSize}px Georgia, serif`;
   if (mobile) {
-    wrapText('Navigate the swimmer through polluted waters.', canvas.width * 0.5, canvas.height * 0.43, canvas.width * 0.78, Math.round(26 * ms));
-    wrapText('Drag anywhere to steer — the swimmer is always in motion.', canvas.width * 0.5, canvas.height * 0.51, canvas.width * 0.78, Math.round(26 * ms));
-    wrapText('Avoid the litter. You have 3 lives for the entire run.', canvas.width * 0.5, canvas.height * 0.59, canvas.width * 0.78, Math.round(26 * ms));
+    // Grouped tightly — 0.06 gap between lines (~36px at mobile)
+    const topY = canvas.height * 0.44;
+    wrapText('Navigate the swimmer through polluted waters.', canvas.width * 0.5, topY, canvas.width * 0.82, instrLineH);
+    wrapText('Drag to steer — the swimmer is always in motion.', canvas.width * 0.5, topY + instrLineH * 1.1, canvas.width * 0.82, instrLineH);
+    wrapText('Avoid litter. You have 3 lives for the entire run.', canvas.width * 0.5, topY + instrLineH * 2.2, canvas.width * 0.82, instrLineH);
   } else {
-    ctx.fillText('Navigate the swimmer through polluted waters.', canvas.width * 0.5, canvas.height * 0.43);
-    ctx.fillText('Move your cursor to steer — the swimmer is always in motion.', canvas.width * 0.5, canvas.height * 0.49);
-    ctx.fillText('Avoid the litter. You have 3 lives for the entire run.', canvas.width * 0.5, canvas.height * 0.55);
+    const topY = canvas.height * 0.43;
+    ctx.fillText('Navigate the swimmer through polluted waters.', canvas.width * 0.5, topY);
+    ctx.fillText('Move your cursor to steer — the swimmer is always in motion.', canvas.width * 0.5, topY + instrLineH);
+    ctx.fillText('Avoid the litter. You have 3 lives for the entire run.', canvas.width * 0.5, topY + instrLineH * 2);
   }
 
   const p = 0.65 + 0.35 * Math.sin(t * 0.04);
   ctx.fillStyle = `rgba(175,225,215,${p})`;
-  ctx.font = `${Math.round(21 * ms)}px Georgia, serif`;
+  const ctaSize = mobile ? 28 : 21;
+  ctx.font = `${ctaSize}px Georgia, serif`;
   const ctaText = mobile ? 'Tap to dive in' : 'Click to dive in';
   const ctaW = ctx.measureText(ctaText).width + 40;
-  const ctaH = Math.round(21 * ms) + 20;
+  const ctaH = ctaSize + 24;
   const ctaX = canvas.width * 0.5 - ctaW / 2;
-  const ctaY = canvas.height * 0.72 - Math.round(21 * ms);
+  const ctaBaseY = canvas.height * 0.75;
+  const ctaY = ctaBaseY - ctaSize;
   ctaRect = { x: ctaX, y: ctaY, w: ctaW, h: ctaH };
-  ctx.fillText(ctaText, canvas.width * 0.5, canvas.height * 0.72);
+  ctx.fillText(ctaText, canvas.width * 0.5, ctaBaseY);
 
   ctx.textAlign = 'left';
 }
